@@ -54,4 +54,15 @@ def preprocess_input(df):
     df['abnormal_glucose'] = df['max_glu_serum'].isin(['>200', '>300']).astype(int)
     df['abnormal_A1C'] = df['A1Cresult'].isin(['>7', '>8']).astype(int)
 
-    df = pd.get_d_
+    return df
+
+# App title
+st.title("Diabetes Readmission Predictor")
+
+# Footer - Developer info
+st.sidebar.markdown("""
+**Developed by Saumya Tiwari**  
+University of California, Davis  
+Health Informatics  
+Department of Public Health
+""")
