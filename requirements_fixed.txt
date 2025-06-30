@@ -4,4 +4,7 @@ numpy<2.0
 scikit-learn
 lightgbm
 joblib
+# Force install update
+joblib
+# Force rebuild
 
