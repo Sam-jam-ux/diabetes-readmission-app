@@ -1,17 +1,9 @@
 streamlit
 pandas
 numpy<2.0
-scikit-learn
+scikit-learn==1.3.2
 lightgbm
-joblib
-# Force install update
 joblib==1.4.2
-# Force rebuild
-=======
-joblib==1.4.0
-joblib
-# Force install update
-joblib
-# Force rebuild
+
 
 
