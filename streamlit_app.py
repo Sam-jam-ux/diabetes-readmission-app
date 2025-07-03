@@ -1,16 +1,16 @@
+# ========== Imports ==========
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
 
-# Load artifacts
-scaler = joblib.load("scaler.pkl")
+# ========== Load Artifacts ==========
 model = joblib.load("lgbm_model.pkl")
-selected_features = joblib.load("selected_features.pkl")
+scaler = joblib.load("scaler.pkl")
 scaler_features = joblib.load("scaler_features.pkl")
 best_threshold = joblib.load("threshold.pkl")
 
-# Constants
+# ========== Constants for Processing ==========
 med_cols = ['metformin', 'glipizide', 'glyburide', 'pioglitazone', 'insulin']
 age_map = {'[0-10)': 5, '[10-20)': 15, '[20-30)': 25, '[30-40)': 35, '[40-50)': 45,
            '[50-60)': 55, '[60-70)': 65, '[70-80)': 75, '[80-90)': 85, '[90-100)': 95}
@@ -25,6 +25,7 @@ diag_map = {
     'Neoplasms': lambda x: 140 <= x < 240
 }
 
+# ========== Preprocessing Function ==========
 def group_diag(code):
     try:
         code = float(code)
@@ -56,13 +57,54 @@ def preprocess_input(df):
 
     return df
 
-# App title
-st.title("Diabetes Readmission Predictor")
+# ========== Streamlit UI ==========
+st.set_page_config(page_title="Diabetes Readmission Predictor", layout="centered")
 
-# Footer - Developer info
-st.sidebar.markdown("""
-**Developed by Saumya Tiwari**  
-University of California, Davis  
-Health Informatics  
-Department of Public Health
-""")
+st.title("🩺 Diabetes Readmission Predictor")
+st.markdown("Upload patient data below to predict likelihood of readmission within 30 days.")
+
+with st.sidebar:
+    st.markdown("### 📄 About")
+    st.write(
+        """
+        This tool predicts hospital readmission risk in diabetic patients based on their medical data.
+        - Upload a properly formatted `.csv` file.
+        - Predictions will be shown for each row.
+        """
+    )
+    st.markdown("---")
+    st.markdown("**Developed by Saumya Tiwari**  \nUniversity of California, Davis  \nHealth Informatics")
+
+st.header("📤 Upload Patient CSV File")
+uploaded_file = st.file_uploader("Choose a CSV file with patient data", type=["csv"])
+
+if uploaded_file:
+    try:
+        input_df = pd.read_csv(uploaded_file)
+        st.success("✅ File uploaded successfully.")
+        st.subheader("📋 Data Preview")
+        st.dataframe(input_df.head(), use_container_width=True)
+
+        input_df_processed = preprocess_input(input_df)
+
+        # Align with training features
+        for col in scaler_features:
+            if col not in input_df_processed.columns:
+                input_df_processed[col] = 0
+        input_df_processed = input_df_processed[scaler_features]
+
+        # Scale and Predict
+        input_scaled = scaler.transform(input_df_processed)
+        input_scaled_df = pd.DataFrame(input_scaled, columns=scaler_features)
+
+        probs = model.predict_proba(input_scaled_df)[:, 1]
+        preds = (probs >= best_threshold).astype(int)
+
+        # Show results
+        st.subheader("📊 Prediction Results")
+        input_df['Readmission Probability'] = probs.round(3)
+        input_df['Readmission Risk (<30 days)'] = np.where(preds == 1, "Yes", "No")
+        st.dataframe(input_df[['Readmission Probability', 'Readmission Risk (<30 days)']], use_container_width=True)
+
+    except Exception as e:
+        st.error(f"⚠️ Error processing the file: {e}")
