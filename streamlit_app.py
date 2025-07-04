@@ -1,4 +1,3 @@
-# ========== Imports ==========
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,104 +6,110 @@ import joblib
 # ========== Load Artifacts ==========
 model = joblib.load("lgbm_model.pkl")
 scaler = joblib.load("scaler.pkl")
-scaler_features = joblib.load("scaler_features.pkl")
-best_threshold = joblib.load("threshold.pkl")
+selected_features = joblib.load("selected_features.pkl")
+threshold = joblib.load("threshold.pkl")
 
-# ========== Constants for Processing ==========
-med_cols = ['metformin', 'glipizide', 'glyburide', 'pioglitazone', 'insulin']
-age_map = {'[0-10)': 5, '[10-20)': 15, '[20-30)': 25, '[30-40)': 35, '[40-50)': 45,
-           '[50-60)': 55, '[60-70)': 65, '[70-80)': 75, '[80-90)': 85, '[90-100)': 95}
-diag_map = {
-    'Circulatory': lambda x: (390 <= x < 460) or (x == 785),
-    'Respiratory': lambda x: (460 <= x < 520) or (x == 786),
-    'Digestive': lambda x: (520 <= x < 580) or (x == 787),
-    'Diabetes': lambda x: 250 <= x < 251,
-    'Injury': lambda x: 800 <= x < 1000,
-    'Musculoskeletal': lambda x: 710 <= x < 740,
-    'Genitourinary': lambda x: (580 <= x < 630) or (x == 788),
-    'Neoplasms': lambda x: 140 <= x < 240
-}
-
-# ========== Preprocessing Function ==========
-def group_diag(code):
-    try:
-        code = float(code)
-        for label, cond in diag_map.items():
-            if cond(code): return label
-        return 'Other'
-    except:
-        return 'Other'
-
-def preprocess_input(df):
-    df['gender'] = df['gender'].map({'Male': 1, 'Female': 0})
-    df['age_numeric'] = df['age'].map(age_map)
-    df.drop('age', axis=1, inplace=True, errors='ignore')
-
-    for col in ['diag_1', 'diag_2', 'diag_3']:
-        if col in df.columns:
-            df[col] = df[col].apply(group_diag)
-    df = pd.get_dummies(df, columns=['diag_1', 'diag_2', 'diag_3'], prefix=['D1', 'D2', 'D3'], drop_first=True)
-
-    df['total_visits'] = df.get('number_outpatient', 0) + df.get('number_emergency', 0) + df.get('number_inpatient', 0)
-    df['long_stay'] = (df['time_in_hospital'] > 7).astype(int)
-    diag_cats = [col for col in df.columns if col.startswith('D1_')]
-    df['num_comorbidities'] = df[diag_cats].sum(axis=1) if diag_cats else 0
-    df['has_insulin'] = df['insulin']
-    df['medication_count'] = df[med_cols].astype(int).sum(axis=1)
-    df['high_risk_discharge'] = df['discharge_disposition_id'].isin([11, 13, 14, 19, 20, 21]).astype(int)
-    df['abnormal_glucose'] = df['max_glu_serum'].isin(['>200', '>300']).astype(int)
-    df['abnormal_A1C'] = df['A1Cresult'].isin(['>7', '>8']).astype(int)
-
-    return df
-
-# ========== Streamlit UI ==========
+# ========== App UI ==========
 st.set_page_config(page_title="Diabetes Readmission Predictor", layout="centered")
-
 st.title("🩺 Diabetes Readmission Predictor")
-st.markdown("Upload patient data below to predict likelihood of readmission within 30 days.")
+st.markdown("Upload a patient dataset **OR** manually enter patient details to predict the likelihood of hospital readmission within 30 days.")
 
+# ========== Sidebar ==========
 with st.sidebar:
-    st.markdown("### 📄 About")
-    st.write(
-        """
-        This tool predicts hospital readmission risk in diabetic patients based on their medical data.
-        - Upload a properly formatted `.csv` file.
-        - Predictions will be shown for each row.
-        """
-    )
-    st.markdown("---")
-    st.markdown("**Developed by Saumya Tiwari**  \nUniversity of California, Davis  \nHealth Informatics")
+    st.header("ℹ️ About")
+    st.markdown("""
+This tool helps clinicians and researchers estimate the risk of diabetes-related hospital readmission.
 
-st.header("📤 Upload Patient CSV File")
-uploaded_file = st.file_uploader("Choose a CSV file with patient data", type=["csv"])
+**Features**:
+- Upload `.csv` file of patients
+- Enter individual patient details
+- Download predictions
+
+Developed by **Saumya Tiwari**  
+UC Davis – Health Informatics
+""")
+
+# ========== Prediction Logic ==========
+def make_prediction(df_input):
+    df_input = df_input[selected_features]
+    df_scaled = pd.DataFrame(scaler.transform(df_input), columns=df_input.columns)
+    probabilities = model.predict_proba(df_scaled)[:, 1]
+    predictions = (probabilities >= threshold).astype(int)
+    df_input["Readmission Probability"] = probabilities
+    df_input["Readmission Prediction (<30 days)"] = ["Yes" if p == 1 else "No" for p in predictions]
+    return df_input[["Readmission Probability", "Readmission Prediction (<30 days)"]]
+
+# ========== 1. Upload ==========
+st.subheader("📂 Upload Patient CSV File")
+uploaded_file = st.file_uploader("Upload a pre-processed .csv file matching model structure", type="csv")
 
 if uploaded_file:
     try:
-        input_df = pd.read_csv(uploaded_file)
-        st.success("✅ File uploaded successfully.")
-        st.subheader("📋 Data Preview")
-        st.dataframe(input_df.head(), use_container_width=True)
-
-        input_df_processed = preprocess_input(input_df)
-
-        # Align with training features
-        for col in scaler_features:
-            if col not in input_df_processed.columns:
-                input_df_processed[col] = 0
-        input_df_processed = input_df_processed[scaler_features]
-
-        # Scale and Predict
-        input_scaled = scaler.transform(input_df_processed)
-        input_scaled_df = pd.DataFrame(input_scaled, columns=scaler_features)
-
-        probs = model.predict_proba(input_scaled_df)[:, 1]
-        preds = (probs >= best_threshold).astype(int)
-
-        # Show results
-        st.subheader("📊 Prediction Results")
-        input_df['Readmission Probability'] = probs.round(3)
-        input_df['Readmission Risk (<30 days)'] = np.where(preds == 1, "Yes", "No")
-        st.dataframe(input_df[['Readmission Probability', 'Readmission Risk (<30 days)']], use_container_width=True)
-
+        df = pd.read_csv(uploaded_file)
+        result = make_prediction(df)
+        st.success("✅ Prediction complete.")
+        st.dataframe(result)
+        st.download_button("📥 Download Results", result.to_csv(index=False), "predictions.csv", "text/csv")
     except Exception as e:
-        st.error(f"⚠️ Error processing the file: {e}")
+        st.error(f"⚠️ Error: {e}")
+
+# ========== Divider ==========
+st.markdown("<h4 style='text-align:center;'>──────────────  OR  ──────────────</h4>", unsafe_allow_html=True)
+
+# ========== 2. Manual Entry ==========
+with st.expander("📝 Manually Enter Patient Data", expanded=False):
+    with st.form("manual_entry_form"):
+        c1, c2 = st.columns(2)
+        with c1:
+            gender = st.radio("Gender", ["Male", "Female"], help="Select the patient's biological sex.")
+            age_numeric = st.slider("Age (years)", 0, 100, 55, step=1)
+            time_in_hospital = st.slider("Hospital stay duration (days)", 1, 30, 5)
+            num_comorbidities = st.slider("Number of comorbidities", 0, 10, 2)
+            medication_count = st.slider("Number of medications", 0, 20, 5)
+            high_risk_discharge = st.checkbox("Discharged to hospice or similar high-risk", help="Check if discharge disposition was hospice-related")
+
+        with c2:
+            num_outpatient = st.number_input("Outpatient visits", 0, 100, 1)
+            num_emergency = st.number_input("Emergency visits", 0, 100, 0)
+            num_inpatient = st.number_input("Inpatient visits", 0, 100, 0)
+            has_insulin = st.selectbox("Insulin administered", [0, 1], format_func=lambda x: "Yes" if x else "No")
+            abnormal_glucose = st.selectbox("Abnormal glucose (>200 mg/dL)", [0, 1], format_func=lambda x: "Yes" if x else "No")
+            abnormal_A1C = st.selectbox("Abnormal A1C (>7%)", [0, 1], format_func=lambda x: "Yes" if x else "No")
+
+        submitted = st.form_submit_button("🔮 Predict")
+
+        if submitted:
+            total_visits = num_outpatient + num_emergency + num_inpatient
+            long_stay = int(time_in_hospital > 7)
+            ageXvisits = age_numeric * total_visits
+            comorbXmed = num_comorbidities * medication_count
+
+            manual_data = {
+                "gender": [1 if gender == "Male" else 0],
+                "age_numeric": [age_numeric],
+                "time_in_hospital": [time_in_hospital],
+                "number_outpatient": [num_outpatient],
+                "number_emergency": [num_emergency],
+                "number_inpatient": [num_inpatient],
+                "total_visits": [total_visits],
+                "long_stay": [long_stay],
+                "num_comorbidities": [num_comorbidities],
+                "medication_count": [medication_count],
+                "has_insulin": [has_insulin],
+                "high_risk_discharge": [int(high_risk_discharge)],
+                "abnormal_glucose": [abnormal_glucose],
+                "abnormal_A1C": [abnormal_A1C],
+                "ageXvisits": [ageXvisits],
+                "comorbXmed": [comorbXmed]
+            }
+
+            df_manual = pd.DataFrame(manual_data)
+            for col in selected_features:
+                if col not in df_manual.columns:
+                    df_manual[col] = 0
+            df_manual = df_manual[selected_features]
+
+            result = make_prediction(df_manual)
+            st.success("✅ Prediction complete.")
+            st.write("### 📊 Result")
+            st.dataframe(result)
