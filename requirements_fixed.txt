@@ -1,9 +1,0 @@
-streamlit
-pandas
-numpy<2.0
-scikit-learn==1.3.2
-lightgbm
-joblib==1.4.2
-
-
-
