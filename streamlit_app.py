@@ -76,7 +76,7 @@ with st.expander("📝 Manually Enter Patient Data", expanded=False):
             abnormal_glucose = st.selectbox("Abnormal glucose (>200 mg/dL)", [0, 1], format_func=lambda x: "Yes" if x else "No")
             abnormal_A1C = st.selectbox("Abnormal A1C (>7%)", [0, 1], format_func=lambda x: "Yes" if x else "No")
 
-        submitted = st.form_submit_button("🔮 Predict")
+        submitted = st.form_submit_button("Predict")
 
         if submitted:
             total_visits = num_outpatient + num_emergency + num_inpatient
